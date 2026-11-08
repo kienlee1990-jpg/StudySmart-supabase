@@ -9,7 +9,8 @@
           <RouterLink to="/">Môn học</RouterLink>
           <button class="nav-chat" @click="openTutor">AI gia sư</button>
           <RouterLink to="/ranking">Leo tháp</RouterLink>
-          <RouterLink v-if="canManageUsers" to="/quiz-admin">Quản trị nội dung</RouterLink>
+          <RouterLink v-if="canManageQuizContent" to="/quiz-admin">Quản trị nội dung</RouterLink>
+          <RouterLink v-if="canManageUsers" to="/users">Quản lý tài khoản</RouterLink>
         </nav>
         <div class="account-actions">
           <RouterLink v-if="!isAuthenticated" to="/register" class="register-link">Tạo tài khoản</RouterLink>
@@ -19,7 +20,7 @@
         </div>
       </div>
       <nav v-if="menuOpen" class="mobile-nav" aria-label="Điều hướng di động">
-        <RouterLink to="/" @click="menuOpen = false">Trang chủ · Môn học</RouterLink><button class="nav-chat" @click="openTutor">AI gia sư</button><RouterLink to="/ranking" @click="menuOpen = false">Leo tháp</RouterLink><RouterLink v-if="canManageUsers" to="/quiz-admin" @click="menuOpen = false">Quản trị nội dung</RouterLink>
+        <RouterLink to="/" @click="menuOpen = false">Trang chủ · Môn học</RouterLink><button class="nav-chat" @click="openTutor">AI gia sư</button><RouterLink to="/ranking" @click="menuOpen = false">Leo tháp</RouterLink><RouterLink v-if="canManageQuizContent" to="/quiz-admin" @click="menuOpen = false">Quản trị nội dung</RouterLink><RouterLink v-if="canManageUsers" to="/users" @click="menuOpen = false">Quản lý tài khoản</RouterLink>
       </nav>
     </header>
     <main class="quiz-main"><slot /></main>
@@ -38,7 +39,8 @@ import { canAccessPermission, getStoredUserPermissions, getStoredUserProfile } f
 const auth = useAuth()
 const menuOpen = ref(false)
 const isAuthenticated = computed(() => auth.isAuthenticated())
-const canManageUsers = computed(() => canAccessPermission(getStoredUserPermissions(), 'ManageQuizContent', getStoredUserProfile()))
+const canManageQuizContent = computed(() => canAccessPermission(getStoredUserPermissions(), 'ManageQuizContent', getStoredUserProfile()))
+const canManageUsers = computed(() => canAccessPermission(getStoredUserPermissions(), 'ManageUsers', getStoredUserProfile()))
 const logout = () => auth.logout()
 const openTutor = () => { menuOpen.value = false; window.dispatchEvent(new Event('open-ai-tutor')) }
 </script>
