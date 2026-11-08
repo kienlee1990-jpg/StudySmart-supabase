@@ -1,16 +1,19 @@
 using QuanLyTaiKhoanAPI.Entities;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 
 namespace QuanLyTaiKhoanAPI.Data;
 
-public class AppDbContext : IdentityDbContext<ApplicationUser>
+public class AppDbContext : IdentityDbContext<ApplicationUser>, IDataProtectionKeyContext
 {
     public const string Schema = "hoctap";
     public AppDbContext(DbContextOptions<AppDbContext> options)
         : base(options)
     {
     }
+
+    public DbSet<DataProtectionKey> DataProtectionKeys { get; set; } = null!;
 
     // ================= User Management =================
     public DbSet<RefreshToken> RefreshTokens { get; set; }

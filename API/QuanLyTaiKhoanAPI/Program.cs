@@ -3,6 +3,7 @@ using QuanLyTaiKhoanAPI.Extensions;
 using QuanLyTaiKhoanAPI.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
@@ -29,6 +30,10 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 #endregion
 
 #region Identity
+// Share password-reset token keys across container instances and restarts.
+builder.Services.AddDataProtection()
+    .SetApplicationName("StudySmart")
+    .PersistKeysToDbContext<AppDbContext>();
 var maxFailedAccessAttempts = builder.Configuration.GetValue("Identity:Lockout:MaxFailedAccessAttempts", 5);
 var defaultLockoutMinutes = builder.Configuration.GetValue("Identity:Lockout:DefaultLockoutMinutes", 15);
 var passwordResetTokenMinutes = builder.Configuration.GetValue("Identity:PasswordResetTokenMinutes", 15);
@@ -270,6 +275,8 @@ if (enableHttpsRedirection)
 }
 
 // CORS should run before authentication/authorization.
+app.UseDefaultFiles();
+app.UseStaticFiles();
 app.UseRouting();
 app.UseCors("AllowVue");
 app.UseRateLimiter();
@@ -284,6 +291,15 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapGet("/api/health", async (AppDbContext db) =>
+{
+    var connected = await db.Database.CanConnectAsync();
+    return connected ? Results.Ok(new { status = "ok" })
+        : Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+}).AllowAnonymous();
+// Keep API errors as API responses, and let Vue Router handle other page URLs.
+app.MapFallback("/api/{**path}", () => Results.NotFound(new { message = "API route not found." }));
+app.MapFallbackToFile("index.html");
 
 #endregion
 

@@ -32,3 +32,6 @@ __pycache__/
 .DS_Store
 .vs/
 .idea/
+
+# Vercel local project linkage
+.vercel/
