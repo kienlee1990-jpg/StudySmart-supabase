@@ -1,0 +1,31 @@
+# Build folders
+bin/
+obj/
+_build_check/
+_deploy/
+.dotnet-tools/
+
+# Visual Studio
+.vs/
+*.user
+*.suo
+
+# Test
+TestResults/
+
+# Logs
+*.log
+logs/
+backend-run*.log
+*.db
+*.db-shm
+*.db-wal
+
+# Local app settings
+**/appsettings.Development.json
+tmp-response.json
+_staging/
+_fe_*/
+
+# Rider (nếu có)
+.idea/

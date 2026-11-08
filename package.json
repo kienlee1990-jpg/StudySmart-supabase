@@ -1,0 +1,8 @@
+{
+  "name": "quan-ly-tai-khoan",
+  "private": true,
+  "scripts": {
+    "dev": "npm --prefix UI run dev",
+    "api": "dotnet run --project API/QuanLyTaiKhoanAPI/QuanLyTaiKhoanAPI.csproj --launch-profile QuanLyTaiKhoanAPI"
+  }
+}
