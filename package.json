@@ -2,6 +2,7 @@
   "name": "quan-ly-tai-khoan",
   "private": true,
   "scripts": {
+    "start": "node scripts/start-local.js",
     "dev": "npm --prefix UI run dev",
     "api": "dotnet run --project API/QuanLyTaiKhoanAPI/QuanLyTaiKhoanAPI.csproj --launch-profile QuanLyTaiKhoanAPI"
   }
