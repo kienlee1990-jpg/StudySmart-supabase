@@ -30,6 +30,7 @@ public class AppDbContext : IdentityDbContext<ApplicationUser>, IDataProtectionK
     public DbSet<QuizAttempt> QuizAttempts => Set<QuizAttempt>();
     public DbSet<QuizAnswer> QuizAnswers => Set<QuizAnswer>();
     public DbSet<QuizLesson> QuizLessons => Set<QuizLesson>();
+    public DbSet<TowerRank> TowerRanks => Set<TowerRank>();
     public DbSet<TowerProgress> TowerProgress => Set<TowerProgress>();
 
     protected override void OnModelCreating(ModelBuilder builder)
@@ -171,11 +172,21 @@ public class AppDbContext : IdentityDbContext<ApplicationUser>, IDataProtectionK
         builder.Entity<QuizAttempt>(entity =>
         {
             entity.Property(item => item.Score).HasPrecision(5, 2);
+            entity.Property(item => item.SubmittedAt).IsConcurrencyToken();
             entity.Property(item => item.GuestId).HasMaxLength(64);
             entity.HasOne(item => item.Exam).WithMany(item => item.Attempts)
                 .HasForeignKey(item => item.ExamId).OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(item => item.User).WithMany()
                 .HasForeignKey(item => item.UserId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        builder.Entity<TowerRank>(entity =>
+        {
+            entity.HasKey(item => new { item.UserId, item.Subject });
+            entity.Property(item => item.Subject).HasMaxLength(30);
+            entity.Property(item => item.Revision).IsConcurrencyToken();
+            entity.HasOne<ApplicationUser>().WithMany().HasForeignKey(item => item.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         builder.Entity<TowerProgress>(entity =>

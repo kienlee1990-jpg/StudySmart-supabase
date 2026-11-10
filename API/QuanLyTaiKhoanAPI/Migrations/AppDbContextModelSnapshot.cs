@@ -418,10 +418,20 @@ namespace QuanLyTaiKhoanAPI.Migrations
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("SubmittedAt")
+                        .IsConcurrencyToken()
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<int>("TotalQuestions")
                         .HasColumnType("integer");
+
+                    b.Property<int?>("TowerRankAtStart")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("TowerRankEpochAtStart")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TowerRankResult")
+                        .HasColumnType("text");
 
                     b.Property<string>("UserId")
                         .HasColumnType("text");
@@ -702,6 +712,33 @@ namespace QuanLyTaiKhoanAPI.Migrations
                     b.ToTable("TowerProgress", "hoctap");
                 });
 
+            modelBuilder.Entity("QuanLyTaiKhoanAPI.Entities.TowerRank", b =>
+                {
+                    b.Property<string>("UserId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Subject")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<int>("ConsecutiveFailures")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CurrentLevel")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Epoch")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("integer");
+
+                    b.HasKey("UserId", "Subject");
+
+                    b.ToTable("TowerRanks", "hoctap");
+                });
+
             modelBuilder.Entity("QuanLyTaiKhoanAPI.Entities.UserPermission", b =>
                 {
                     b.Property<string>("UserId")
@@ -881,6 +918,15 @@ namespace QuanLyTaiKhoanAPI.Migrations
                         .WithMany()
                         .HasForeignKey("UserId")
                         .OnDelete(DeleteBehavior.Cascade);
+                });
+
+            modelBuilder.Entity("QuanLyTaiKhoanAPI.Entities.TowerRank", b =>
+                {
+                    b.HasOne("QuanLyTaiKhoanAPI.Entities.ApplicationUser", null)
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
                 });
 
             modelBuilder.Entity("QuanLyTaiKhoanAPI.Entities.UserPermission", b =>

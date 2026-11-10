@@ -1,4 +1,6 @@
 using System.Text.Json;
+using System.Security.Claims;
+using QuanLyTaiKhoanAPI.Entities;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -22,14 +24,30 @@ public sealed class QuizPersistenceTests : IDisposable
     private AppDbContext Open() => new(new DbContextOptionsBuilder<AppDbContext>()
         .UseSqlite($"Data Source={_path};Pooling=False").Options);
 
-    private QuizController Controller(AppDbContext db, string? guestId = null)
+    private QuizController Controller(AppDbContext db, string? guestId = null, bool authenticated = false)
     {
         var controller = new QuizController(db, new QuizStore(db))
         {
             ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() }
         };
         controller.Request.Headers["X-Guest-Id"] = guestId ?? _guestId;
+        if (authenticated) {
+            var id = guestId ?? _guestId;
+            if (!db.Users.Any(user => user.Id == id)) { db.Users.Add(new ApplicationUser { Id = id, UserName = id }); db.SaveChanges(); }
+            controller.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, id)], "Test"));
+        }
         return controller;
+    }
+
+    [Fact]
+    public async Task GuestsCannotStartTowerOrExamRoomEvenWithGuestIdentity()
+    {
+        await using var db = Open();
+        await db.Database.EnsureCreatedAsync();
+        var controller = Controller(db);
+        Assert.IsType<UnauthorizedResult>(await controller.StartTowerSession(new() { Subject = "Toán", Level = 1 }));
+        Assert.IsType<UnauthorizedResult>(await controller.StartRandomSession(new() { Subject = "Toán", Grade = 5, Mode = "ExamRoom", DurationMinutes = 60 }));
+        Assert.Empty(await db.QuizAttempts.ToListAsync());
     }
 
     [Fact]
@@ -92,7 +110,7 @@ public sealed class QuizPersistenceTests : IDisposable
             for (var i = 0; i < 40; i++)
                 await store.AddQuestionAsync(5, "Toán", $"Tower question {i}", "Explanation",
                     [("Correct", true), ("Wrong", false)]);
-            var controller = Controller(db);
+            var controller = Controller(db, authenticated: true);
             var start = Assert.IsType<OkObjectResult>(await controller.StartTowerSession(new() { Subject = "Toán", Level = 1 }));
             attemptId = JsonSerializer.SerializeToElement(start.Value).GetProperty("attempt").GetProperty("Id").GetInt32();
             var session = (await store.GetSessionAsync(attemptId))!;
@@ -101,7 +119,7 @@ public sealed class QuizPersistenceTests : IDisposable
                 QuestionId = question.Id, OptionId = question.Options.Single(option => option.IsCorrect).Id
             }).ToList();
             Assert.IsType<ConflictObjectResult>(await controller.CheckStudyAnswer(attemptId, correctAnswers[1]));
-            Assert.IsType<ForbidResult>(await Controller(db, Guid.NewGuid().ToString("N"))
+            Assert.IsType<ForbidResult>(await Controller(db, Guid.NewGuid().ToString("N"), authenticated: true)
                 .CheckStudyAnswer(attemptId, correctAnswers[0]));
             var timeout = new SubmitQuizAnswerDto { QuestionId = correctAnswers[0].QuestionId, OptionId = null };
             var response = Assert.IsType<OkObjectResult>(await controller.CheckStudyAnswer(attemptId, timeout));
@@ -115,7 +133,7 @@ public sealed class QuizPersistenceTests : IDisposable
         // Locked answers must survive a new request/database context.
         await using (var db = Open())
         {
-            var controller = Controller(db);
+            var controller = Controller(db, authenticated: true);
             foreach (var answer in correctAnswers.Skip(1))
                 Assert.IsType<OkObjectResult>(await controller.CheckStudyAnswer(attemptId, answer));
             Assert.IsType<ConflictObjectResult>(await controller.CheckStudyAnswer(attemptId,

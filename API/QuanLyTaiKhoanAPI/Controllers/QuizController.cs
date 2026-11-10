@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using System.ComponentModel.DataAnnotations;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -112,7 +113,7 @@ public class QuizController : ControllerBase
         {
             if (progressByLevel.TryGetValue(level, out var savedProgress))
             {
-                if (savedProgress.Stars != bestStars)
+                if (savedProgress.Stars < bestStars)
                 {
                     savedProgress.Stars = bestStars;
                     savedProgress.UpdatedAt = DateTime.UtcNow;
@@ -137,6 +138,7 @@ public class QuizController : ControllerBase
         }
         if (progressChanged) await _db.SaveChangesAsync();
 
+        var rank = userId == null ? null : await GetTowerRank(userId, subject);
         var starsByLevel = progress.ToDictionary(item => item.Level, item => item.Stars);
         var bank = await _db.QuizQuestions.AsNoTracking()
             .Where(question => question.IsActive && question.Subject == subject)
@@ -157,7 +159,7 @@ public class QuizController : ControllerBase
                 QuestionGrade = rules.QuestionGrade,
                 Stars = stars,
                 MaxStars = TowerMaximumStars,
-                IsUnlocked = level == 1 || starsByLevel.GetValueOrDefault(level - 1) >= TowerMaximumStars,
+                IsUnlocked = (rank == null || level <= rank.CurrentLevel) && (level == 1 || starsByLevel.GetValueOrDefault(level - 1) >= TowerMaximumStars),
                 IsCompleted = stars >= TowerMaximumStars,
                 QuestionCount = availability.NormalQuestions + availability.AdvancedQuestions,
                 RequiredQuestions = rules.RequiredQuestions,
@@ -169,27 +171,31 @@ public class QuizController : ControllerBase
                 UnavailableReason = availability.UnavailableReason(rules)
             };
         }).ToList();
-        return Ok(new { Subject = subject, StarRules = "90%+: 5 sao; 80–89%: 4 sao; 70–79%: 3 sao; 60–69%: 2 sao; 50–59%: 1 sao; dưới 50%: 0 sao.", Levels = levels });
+        return Ok(new { Subject = subject, CurrentLevel = rank?.CurrentLevel, ConsecutiveFailures = rank?.ConsecutiveFailures ?? 0, StarRules = "90%+: 5 sao; 80–89%: 4 sao; 70–79%: 3 sao; 60–69%: 2 sao; 50–59%: 1 sao; dưới 50%: 0 sao.", Levels = levels });
     }
 
+    [Authorize]
     [HttpPost("tower/sessions")]
     public async Task<IActionResult> StartTowerSession([FromBody] StartTowerLevelDto dto)
     {
+        if (User.Identity?.IsAuthenticated != true) return Unauthorized();
         if (!IsAllowedSubject(dto.Subject)) return BadRequest(new { message = "Môn học không hợp lệ." });
         if (dto.Level is < 1 or > TowerLevelCount) return BadRequest(new { message = $"Tháp hiện có Level 1 đến Level {TowerLevelCount}." });
         var (userId, guestId) = ResolveProgressOwner();
         if (userId == null && guestId == null)
             return BadRequest(new { message = "Thiếu mã phiên học sinh. Hãy tải lại trang rồi thử lại." });
 
+        var rank = await GetTowerRank(userId!, dto.Subject);
+        if (dto.Level > rank.CurrentLevel)
+            return Conflict(new { message = $"Level {dto.Level} đang khóa. Rank hiện tại của em là tầng {rank.CurrentLevel}. Hãy vượt tầng này trước nhé." });
+
         if (dto.Level > 1)
         {
-            var previousProgress = _db.TowerProgress.AsNoTracking().Where(item =>
-                item.Subject == dto.Subject && item.Level == dto.Level - 1);
-            var previousStars = userId != null
-                ? await previousProgress.Where(item => item.UserId == userId).Select(item => (int?)item.Stars).FirstOrDefaultAsync()
-                : await previousProgress.Where(item => item.GuestId == guestId).Select(item => (int?)item.Stars).FirstOrDefaultAsync();
-            if (previousStars.GetValueOrDefault() < TowerMaximumStars)
-                return Conflict(new { message = $"Level {dto.Level} đang khóa. Hãy đạt đủ {TowerMaximumStars} sao ở Level {dto.Level - 1} trước nhé." });
+            var previousStars = await _db.TowerProgress.AsNoTracking()
+                .Where(item => item.UserId == userId && item.Subject == dto.Subject && item.Level == dto.Level - 1)
+                .Select(item => (int?)item.Stars).FirstOrDefaultAsync() ?? 0;
+            if (previousStars < TowerMaximumStars)
+                return Conflict(new { message = "Hãy đạt 5 sao ở tầng trước để mở tầng này." });
         }
 
         var rules = TowerQuestionPolicy.GetRules(dto.Level);
@@ -219,6 +225,8 @@ public class QuizController : ControllerBase
             Exam = exam,
             UserId = userId,
             GuestId = guestId,
+            TowerRankAtStart = rank.CurrentLevel,
+            TowerRankEpochAtStart = rank.Epoch,
             TotalQuestions = chosen.Length
         };
         _db.QuizAttempts.Add(attempt);
@@ -246,6 +254,7 @@ public class QuizController : ControllerBase
     [HttpPost("sessions")]
     public async Task<IActionResult> StartRandomSession([FromBody] StartRandomQuizDto dto)
     {
+        if (dto.Mode == "ExamRoom" && User.Identity?.IsAuthenticated != true) return Unauthorized();
         var count = dto.DurationMinutes == 15 ? 10 : dto.DurationMinutes == 60 ? 40 : 0;
         if (count == 0)
             return BadRequest(new { message = "Chỉ hỗ trợ bài 15 phút (10 câu) hoặc 60 phút (40 câu)." });
@@ -372,11 +381,20 @@ public class QuizController : ControllerBase
         var quiz = await _db.QuizExams.Include(item => item.Questions)
             .FirstOrDefaultAsync(item => item.Id == id && item.IsPublished && item.Questions.Any());
         if (quiz == null) return NotFound();
+        if (quiz.Mode is "Tower" or "ExamRoom" && User.Identity?.IsAuthenticated != true) return Unauthorized();
         if (quiz.Questions.Count == 0) return BadRequest(new { message = "Bài này không còn câu hỏi." });
 
+        TowerRank? rank = null;
+        if (quiz.Mode == "Tower")
+        {
+            rank = await GetTowerRank(User.FindFirstValue(ClaimTypes.NameIdentifier)!, quiz.Subject);
+            if (quiz.TowerLevel == null || quiz.TowerLevel > rank.CurrentLevel) return Conflict(new { message = "Tầng này đang khóa." });
+        }
         var attempt = new QuizAttempt
         {
             ExamId = quiz.Id,
+            TowerRankAtStart = rank?.CurrentLevel,
+            TowerRankEpochAtStart = rank?.Epoch,
             UserId = User.Identity?.IsAuthenticated == true ? User.FindFirstValue(ClaimTypes.NameIdentifier) : null,
             GuestId = User.Identity?.IsAuthenticated == true ? null : GetGuestIdHeader(),
             GuestName = User.Identity?.IsAuthenticated == true ? null : CleanGuestName(dto?.GuestName),
@@ -393,6 +411,7 @@ public class QuizController : ControllerBase
         var attempt = await _db.QuizAttempts.Include(item => item.Exam)
             .FirstOrDefaultAsync(item => item.Id == attemptId);
         if (attempt == null) return NotFound();
+        if (attempt.Exam.Mode is "Tower" or "ExamRoom" && User.Identity?.IsAuthenticated != true) return Unauthorized();
         if (attempt.SubmittedAt.HasValue || attempt.Exam.Mode is not ("Study" or "Tower"))
             return BadRequest(new { message = "Chế độ này không hỗ trợ xem đáp án từng câu." });
 
@@ -456,6 +475,7 @@ public class QuizController : ControllerBase
         var attempt = await _db.QuizAttempts.Include(item => item.Exam)
             .FirstOrDefaultAsync(item => item.Id == attemptId);
         if (attempt == null) return NotFound();
+        if (attempt.Exam.Mode is "Tower" or "ExamRoom" && User.Identity?.IsAuthenticated != true) return Unauthorized();
 
         var currentUserId = User.Identity?.IsAuthenticated == true
             ? User.FindFirstValue(ClaimTypes.NameIdentifier)
@@ -470,6 +490,7 @@ public class QuizController : ControllerBase
         if (session == null)
             return StatusCode(StatusCodes.Status410Gone, new { message = "Lượt làm bài cũ không có câu hỏi đã lưu. Hãy bắt đầu lượt mới." });
 
+        var submissionRank = attempt.Exam.Mode == "Tower" ? await GetTowerRank(attempt.UserId!, attempt.Exam.Subject) : null;
         var elapsed = DateTime.UtcNow - attempt.StartedAt;
         if (attempt.Exam.DurationMinutes > 0 && elapsed > TimeSpan.FromMinutes(attempt.Exam.DurationMinutes) + TimeSpan.FromSeconds(10))
             return BadRequest(new { message = "Đã hết thời gian làm bài." });
@@ -534,6 +555,8 @@ public class QuizController : ControllerBase
                 _db.TowerProgress.Add(towerProgress);
             }
 
+            var rankOutcome = TowerRankPolicy.Apply(submissionRank!, level, attempt.TowerRankAtStart, attempt.TowerRankEpochAtStart, attemptStars >= TowerMaximumStars);
+            attempt.TowerRankResult = JsonSerializer.Serialize(rankOutcome);
             var previousBestStars = towerProgress.Stars;
             towerProgress.Stars = Math.Max(towerProgress.Stars, attemptStars);
             var earnedStar = towerProgress.Stars > previousBestStars;
@@ -541,16 +564,21 @@ public class QuizController : ControllerBase
             towerResult = new
             {
                 Level = level,
+                rankOutcome.CurrentLevel, rankOutcome.ConsecutiveFailures, rankOutcome.Demoted, rankOutcome.CountsForRank,
                 Stars = towerProgress.Stars,
                 MaxStars = TowerMaximumStars,
                 AttemptStars = attemptStars,
                 EarnedStar = earnedStar,
-                Passed = attemptStars > 0,
+                Passed = attemptStars >= TowerMaximumStars,
                 IsCompleted = towerProgress.Stars >= TowerMaximumStars,
-                NextLevelUnlocked = towerProgress.Stars >= TowerMaximumStars,
+                NextLevelUnlocked = level < rankOutcome.CurrentLevel,
             };
         }
-        await _db.SaveChangesAsync();
+        try { await _db.SaveChangesAsync(); }
+        catch (DbUpdateConcurrencyException)
+        {
+            return Conflict(new { message = "Tiến trình vừa thay đổi ở lượt chơi khác. Em thử nộp lại nhé." });
+        }
 
         return Ok(new
         {
@@ -618,9 +646,12 @@ public class QuizController : ControllerBase
                     ((userId != null && item.UserId == userId) ||
                      (userId == null && item.GuestId == guestId)))
                 .Select(item => (int?)item.Stars).FirstOrDefaultAsync() ?? attemptStars;
+            var rankOutcome = attempt.TowerRankResult == null ? null : JsonSerializer.Deserialize<TowerRankOutcome>(attempt.TowerRankResult);
             tower = new { Level = level, Stars = stars, MaxStars = TowerMaximumStars,
-                AttemptStars = attemptStars, EarnedStar = false, Passed = attemptStars > 0,
-                IsCompleted = stars >= TowerMaximumStars, NextLevelUnlocked = stars >= TowerMaximumStars };
+                CurrentLevel = rankOutcome?.CurrentLevel, ConsecutiveFailures = rankOutcome?.ConsecutiveFailures ?? 0,
+                Demoted = rankOutcome?.Demoted ?? false, CountsForRank = rankOutcome?.CountsForRank ?? false,
+                AttemptStars = attemptStars, EarnedStar = false, Passed = attemptStars >= TowerMaximumStars,
+                IsCompleted = stars >= TowerMaximumStars, NextLevelUnlocked = rankOutcome != null ? level < rankOutcome.CurrentLevel : stars >= TowerMaximumStars };
         }
         return Ok(new
         {
@@ -629,6 +660,20 @@ public class QuizController : ControllerBase
             TotalQuestions = attempt.TotalQuestions,
             Answers = exam.Mode == "Tower" ? answers.Take(0).ToList() : answers
         });
+    }
+
+    private async Task<TowerRank> GetTowerRank(string userId, string subject)
+    {
+        var rank = await _db.TowerRanks.FindAsync(userId, subject);
+        if (rank != null) return rank;
+        var highestCompleted = await _db.TowerProgress.AsNoTracking()
+            .Where(item => item.UserId == userId && item.Subject == subject && item.Stars >= TowerMaximumStars)
+            .Select(item => (int?)item.Level).MaxAsync() ?? 0;
+        rank = new TowerRank { UserId = userId, Subject = subject, CurrentLevel = Math.Clamp(highestCompleted + 1, 1, TowerLevelCount) };
+        _db.TowerRanks.Add(rank);
+        // Initialize once. Existing records/stars are retained; old failures are not replayed.
+        await _db.SaveChangesAsync();
+        return rank;
     }
 
     private static string? CleanGuestName(string? value)

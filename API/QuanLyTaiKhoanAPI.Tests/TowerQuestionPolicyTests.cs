@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -21,6 +22,8 @@ public sealed class TowerQuestionPolicyTests : IDisposable
         var controller = new QuizController(db, new QuizStore(db))
         { ControllerContext = new ControllerContext { HttpContext = new DefaultHttpContext() } };
         controller.Request.Headers["X-Guest-Id"] = _guestId;
+        EnsureUser(db);
+        controller.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, _guestId)], "Test"));
         return controller;
     }
     private static List<QuizQuestion> Bank(int grade, int normalCount = 30, int advancedCount = 30)
@@ -45,8 +48,13 @@ public sealed class TowerQuestionPolicyTests : IDisposable
         }
         return result;
     }
-    private void Unlock(AppDbContext db, int level) => db.TowerProgress.Add(new()
-    { GuestId = _guestId, Subject = "Toán", Level = level - 1, Stars = 5 });
+    private void EnsureUser(AppDbContext db) {
+        if (!db.Users.Any(user => user.Id == _guestId)) { db.Users.Add(new ApplicationUser { Id = _guestId, UserName = _guestId }); db.SaveChanges(); }
+    }
+    private void Unlock(AppDbContext db, int level) {
+        EnsureUser(db);
+        db.TowerProgress.Add(new() { UserId = _guestId, Subject = "Toán", Level = level - 1, Stars = 5 });
+    }
     private static JsonElement Json(OkObjectResult response) => JsonSerializer.SerializeToElement(response.Value);
     private static int AttemptId(JsonElement response) => response.GetProperty("attempt").GetProperty("Id").GetInt32();
     private static int[] QuestionIds(JsonElement response) => response.GetProperty("quiz").GetProperty("Questions")

@@ -22,6 +22,8 @@ import {
     hasRole
 } from "../utils/accessControl"
 
+import { hasAccountSession, requiresAccountMode } from "../utils/accountSession"
+
 const routes = [
     {
         path: "/login",
@@ -37,8 +39,8 @@ const routes = [
     { path: "/subjects/:subjectSlug", name: "SubjectHome", component: SubjectHome },
     { path: "/learning/:subjectSlug/:grade", name: "LessonCatalog", component: LessonCatalog },
     { path: "/learning/:subjectSlug/:grade/video/:id", name: "LessonVideo", component: LessonVideo },
-    { path: "/ranking", name: "Ranking", component: Ranking },
-    { path: "/tower-session/:subjectSlug/:level", name: "TowerSession", component: QuizPlay, props: route => ({ ...route.params, mode: "Tower" }) },
+    { path: "/ranking", name: "Ranking", component: Ranking, meta: { requiresAuth: true } },
+    { path: "/tower-session/:subjectSlug/:level", name: "TowerSession", component: QuizPlay, meta: { requiresAuth: true }, props: route => ({ ...route.params, mode: "Tower" }) },
     { path: "/quiz-session/:subjectSlug/:mode/:grade/:duration", name: "QuizSession", component: QuizPlay, props: route => ({ ...route.params, topics: route.query.topics }) },
     { path: "/quiz/:id", name: "QuizPlay", component: QuizPlay, props: true },
     { path: "/quiz-result/:id", name: "QuizResult", component: QuizResult, props: true },
@@ -100,7 +102,7 @@ const clearStoredSession = () => {
 const getFirstAuthorizedPath = (permissions, profile) => {
     const firstRoute = routes.find(route => {
         if (!route?.path || route.path === "/login" || route.path === "/") return false
-        if (!route?.meta?.requiresAuth) return false
+        if (!route?.meta?.permission) return false
         return canAccessPermission(permissions, route.meta.permission, profile)
     })
 
@@ -108,12 +110,12 @@ const getFirstAuthorizedPath = (permissions, profile) => {
 }
 
 router.beforeEach((to) => {
-    const token = localStorage.getItem("token")
+    const token = hasAccountSession()
     const permissions = getStoredUserPermissions()
     const profile = getStoredUserProfile()
 
-    if (to.meta.requiresAuth && !token) {
-        return { path: "/login" }
+    if ((to.meta.requiresAuth || requiresAccountMode(to.params.mode)) && !token) {
+        return { path: "/login", query: { redirect: to.fullPath } }
     }
 
     if (token && to.meta?.adminOnly && !hasRole(profile, "Admin")) {

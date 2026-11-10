@@ -9,7 +9,7 @@
         <span class="eyebrow">{{ quiz.mode === 'Tower' ? `LEO THÁP · LEVEL ${quiz.towerLevel}` : `${modeLabel} · LỚP ${quiz.grade}` }}</span>
         <h1>{{ quiz.title }}</h1>
         <p>{{ quiz.description }}</p>
-        <div class="facts"><span>📚 {{ quiz.subject }}</span><span>📝 {{ questionCount }} câu hỏi</span><span v-if="isTower">15 giây / câu</span><span v-else-if="quiz.durationMinutes">⏱ {{ quiz.durationMinutes }} phút</span><span v-else>Không giới hạn thời gian</span></div>
+        <div class="facts"><span>📚 {{ quiz.subject }}</span><span>📝 {{ questionCount }} câu hỏi</span><span v-if="isTower">60 giây / câu</span><span v-else-if="quiz.durationMinutes">⏱ {{ quiz.durationMinutes }} phút</span><span v-else>Không giới hạn thời gian</span></div>
         <label v-if="!authenticated && quiz.mode !== 'Tower'" class="guest-name">Tên của em (không bắt buộc)<input v-model="guestName" maxlength="100" placeholder="Ví dụ: Minh Anh" /></label>
         <button class="begin-button" :disabled="starting" @click="begin">{{ starting ? 'Đang vào bài…' : 'Bắt đầu làm bài' }} <span>→</span></button>
       </section>
@@ -49,14 +49,14 @@
             </div>
 
             <div v-if="isTower && towerLocked" class="tower-feedback" :class="{ correct: towerFeedback?.isCorrect, incorrect: towerFeedback && !towerFeedback.isCorrect }" role="status" aria-live="polite">
-              <template v-if="towerFeedback"><strong>{{ towerFeedback.isCorrect ? 'Chính xác! 🌟' : towerTimedOut ? 'Hết giờ! Câu này tính là sai.' : 'Chưa chính xác.' }}</strong><span>Đáp án đúng: {{ towerFeedback.correctOption }}</span></template>
+              <template v-if="towerFeedback"><strong>{{ towerFeedback.isCorrect ? 'Chính xác! 🌟' : towerTimedOut ? 'Hết giờ! Câu này tính là sai.' : 'Chưa chính xác.' }}</strong><span>Đáp án đúng: {{ towerFeedback.correctOption }}</span><span>{{ activeQuestionIndex < quiz.questions.length - 1 ? 'Tự chuyển câu sau 2 giây…' : 'Đang hoàn tất lượt chơi…' }}</span></template>
               <span v-else-if="!towerAnswerError">Đang chấm đáp án…</span>
               <template v-else><span>{{ towerAnswerError }}</span><button type="button" @click="gradeTowerAnswer">Thử lại</button></template>
             </div>
-            <p v-if="submitError" class="tower-feedback incorrect" role="alert">{{ submitError }}</p>
+            <div v-if="submitError" class="tower-feedback incorrect" role="alert"><span>{{ submitError }}</span><button type="button" :disabled="submitting" @click="submit">Thử nộp lại</button></div>
             <div class="tower-bottom-bar">
               <span class="tower-answered-count"><strong>{{ isTower ? Object.keys(feedback).length : answeredCount }}</strong> / {{ quiz.questions.length }} {{ isTower ? 'câu đã chấm' : 'câu đã chọn' }}</span>
-              <div class="tower-navigation">
+              <div v-if="!isTower" class="tower-navigation">
                 <button v-if="!isTower" class="tower-nav-button previous" type="button" :disabled="activeQuestionIndex === 0" @click="goToQuestion(activeQuestionIndex - 1)">← <span>Câu trước</span></button>
                 <button v-if="activeQuestionIndex < quiz.questions.length - 1" class="tower-nav-button next" type="button" :disabled="isTower && !towerFeedback" @click="goToQuestion(activeQuestionIndex + 1)">Câu tiếp theo <span>→</span></button>
                 <button v-else class="tower-submit-button" type="button" :disabled="submitting || (isTower && !towerFeedback)" @click="submit">{{ submitting ? 'Đang chấm bài…' : 'Nộp bài' }} <span>✓</span></button>
@@ -93,6 +93,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { RouterLink, useRouter } from 'vue-router'
 import QuizLayout from './QuizLayout.vue'
 import httpClient from '../../services/httpClient'
+import { hasAccountSession, requiresAccountMode } from '../../utils/accountSession'
 import { guestRequestConfig } from '../../utils/guestIdentity'
 
 const props = defineProps({
@@ -128,9 +129,11 @@ const towerTimedOut = ref(false)
 const towerAnswerError = ref('')
 const towerGrading = ref(false)
 const towerFeedback = computed(() => feedback.value[activeQuestion.value?.id] ?? null)
-const authenticated = Boolean(localStorage.getItem('token'))
+const authenticated = hasAccountSession()
 let timerId
 let timerDeadline = 0
+let towerAdvanceId
+let disposed = false
 
 const answeredCount = computed(() => Object.values(answered.value).filter(Boolean).length)
 const activeQuestion = computed(() => quiz.value?.questions?.[activeQuestionIndex.value] ?? null)
@@ -170,12 +173,13 @@ const startCountdown = durationMinutes => {
   if (secondsLeft.value > 0) timerId = setInterval(updateCountdown, 250)
 }
 const startTowerCountdown = () => {
+  clearTimeout(towerAdvanceId)
   if (timerId) clearInterval(timerId)
   towerLocked.value = false
   towerTimedOut.value = false
   towerAnswerError.value = ''
-  timerDeadline = Date.now() + 15_000
-  secondsLeft.value = 15
+  timerDeadline = Date.now() + 60_000
+  secondsLeft.value = 60
   const tick = () => {
     secondsLeft.value = Math.max(0, Math.ceil((timerDeadline - Date.now()) / 1000))
     if (secondsLeft.value === 0) finishTowerQuestion(null)
@@ -207,7 +211,15 @@ const gradeTowerAnswer = async () => {
     const response = await httpClient.post(`/quizzes/attempts/${attempt.value.id}/answer`, {
       questionId, optionId: answered.value[questionId]
     }, guestRequestConfig())
+    if (disposed) return
     feedback.value[questionId] = response.data
+    clearTimeout(towerAdvanceId)
+    towerAdvanceId = setTimeout(() => {
+      towerAdvanceId = undefined
+      if (disposed || activeQuestion.value?.id !== questionId) return
+      if (activeQuestionIndex.value < quiz.value.questions.length - 1) goToQuestion(activeQuestionIndex.value + 1)
+      else submit()
+    }, 2000)
   } catch {
     towerAnswerError.value = 'Chưa chấm được đáp án. Em thử lại nhé.'
   } finally {
@@ -232,7 +244,7 @@ const loadQuiz = async () => {
     }
     quiz.value = {
       title: isTower ? `Leo tháp · Level ${props.level} · ${subject}` : `${props.mode === 'Test' ? 'Kiểm tra' : 'Bài thi'} ${props.duration} phút · ${subject}`,
-      description: isTower ? 'Số câu Nâng cao tăng theo bậc; hai tầng liền kề không trùng câu hỏi. Mỗi câu có 15 giây, chấm ngay khi chọn hoặc hết giờ. Không được đổi đáp án hay quay lại câu đã qua.' : 'Hệ thống sẽ chọn ngẫu nhiên câu hỏi từ ngân hàng ngay khi em bắt đầu.',
+      description: isTower ? 'Số câu Nâng cao tăng theo bậc; hai tầng liền kề không trùng câu hỏi. Mỗi câu có 60 giây, chấm ngay khi chọn hoặc hết giờ. Tự chuyển câu sau khi hiện kết quả 2 giây. Không được đổi đáp án hay quay lại câu đã qua.' : 'Hệ thống sẽ chọn ngẫu nhiên câu hỏi từ ngân hàng ngay khi em bắt đầu.',
       grade: isTower ? 5 : Number(props.grade), subject, mode: props.mode,
       durationMinutes: isTower ? 0 : Number(props.duration), towerLevel: isTower ? Number(props.level) : null, questions: []
     }
@@ -241,6 +253,10 @@ const loadQuiz = async () => {
   }
   try {
     const response = await httpClient.get(`/quizzes/${props.id}`)
+    if (requiresAccountMode(response.data.mode) && !hasAccountSession()) {
+      await router.replace({ path: '/login' })
+      return
+    }
     quiz.value = response.data
   } catch {
     error.value = 'Không tìm thấy bài hoặc bài chưa được mở.'
@@ -250,6 +266,10 @@ const loadQuiz = async () => {
 }
 
 const begin = async () => {
+  if (requiresAccountMode(quiz.value?.mode) && !hasAccountSession()) {
+    await router.replace('/login')
+    return
+  }
   const isImmersiveExam = quiz.value && ['Tower', 'ExamRoom'].includes(quiz.value.mode)
   if (isImmersiveExam) document.body.classList.add('immersive-exam-active')
   if (isImmersiveExam && !document.fullscreenElement) {
@@ -302,6 +322,7 @@ const checkStudyAnswer = async (question, optionId) => {
 const submit = async () => {
   if (!attempt.value || submitting.value || result.value) return
   if (isTower.value && (activeQuestionIndex.value !== quiz.value.questions.length - 1 || !towerFeedback.value)) return
+  clearTimeout(towerAdvanceId)
   submitting.value = true
   submitError.value = ''
   if (timerId) clearInterval(timerId)
@@ -325,6 +346,8 @@ onMounted(() => {
   loadQuiz()
 })
 onUnmounted(() => {
+  disposed = true
+  clearTimeout(towerAdvanceId)
   if (timerId) clearInterval(timerId)
   document.removeEventListener('fullscreenchange', syncFullscreen)
   document.body.classList.remove('immersive-exam-active')

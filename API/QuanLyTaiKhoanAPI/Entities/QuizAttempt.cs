@@ -10,6 +10,9 @@ public class QuizAttempt
     public DateTime StartedAt { get; set; } = DateTime.UtcNow;
     public DateTime? SubmittedAt { get; set; }
     public decimal? Score { get; set; }
+    public int? TowerRankAtStart { get; set; }
+    public int? TowerRankEpochAtStart { get; set; }
+    public string? TowerRankResult { get; set; }
     public int TotalQuestions { get; set; }
 
     public QuizExam Exam { get; set; } = null!;

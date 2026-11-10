@@ -1,9 +1,11 @@
 ﻿import { ref } from "vue"
-import { useRouter } from "vue-router"
+import { hasAccountSession, notifySessionChanged, safeReturnPath } from "../utils/accountSession"
+import { useRoute, useRouter } from "vue-router"
 import { getMe as getMeApi, loginApi, logoutApi } from "../services/authService"
 
 export function useAuth() {
     const router = useRouter()
+    const route = useRoute()
     const loading = ref(false)
     const error = ref("")
     const user = ref(null)
@@ -35,6 +37,7 @@ export function useAuth() {
         localStorage.removeItem("fullName")
         localStorage.removeItem("email")
         user.value = null
+        notifySessionChanged()
     }
 
     const login = async (username, password) => {
@@ -58,7 +61,8 @@ export function useAuth() {
             const profile = normalizeUser(await getMeApi())
             syncUserStorage(profile)
 
-            router.push("/")
+            notifySessionChanged()
+            router.push(safeReturnPath(route.query.redirect))
             return profile
         } catch (err) {
             clearSession()
@@ -80,11 +84,11 @@ export function useAuth() {
             console.warn("Logout API failed:", err?.message || err)
         } finally {
             clearSession()
-            router.push("/login")
+            router.push("/")
         }
     }
 
-    const isAuthenticated = () => !!localStorage.getItem("token")
+    const isAuthenticated = hasAccountSession
 
     const getMe = async () => {
         try {
@@ -94,7 +98,7 @@ export function useAuth() {
         } catch (err) {
             console.log(err.message)
             clearSession()
-            router.push("/login")
+            router.push("/")
             return null
         }
     }

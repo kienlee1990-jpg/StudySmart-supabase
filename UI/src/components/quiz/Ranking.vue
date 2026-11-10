@@ -6,8 +6,9 @@
       <h1>Leo tháp {{ subject }}</h1>
       <p>Chinh phục 1000 tầng, tích lũy sao và mở khóa thử thách khó dần.</p>
       <div class="tower-summary"><span>🗼 <strong>{{ completedLevels }}/1000</strong> tầng hoàn thành</span><span>⭐ <strong>{{ totalStars }}/{{ levels.length * 5 }}</strong> sao</span></div>
+      <p v-if="rankLevel" class="rules-note">Rank hiện tại: tầng {{ rankLevel }} · Chuỗi chưa qua tầng: {{ consecutiveFailures }}/3</p>
       <div class="journey-progress"><div><span>TIẾN ĐỘ HÀNH TRÌNH</span><strong>{{ completedLevels }}/1000 tầng</strong></div><div class="hero-progress"><span :style="{ width: `${completedLevels / 10}%` }"></span></div></div>
-      <p class="rules-note">Khối lớp, số câu và tỷ lệ câu Nâng cao tăng theo bậc. Hai tầng liền kề không trùng câu hỏi. Đạt 90% được 5 sao; mỗi bậc 10% thấp hơn giảm 1 sao. Cần 5 sao để mở tầng kế. Mỗi câu có 15 giây, chấm ngay khi chọn hoặc hết giờ; không đổi đáp án hay quay lại câu đã qua.</p>
+      <p class="rules-note">Khối lớp, số câu và tỷ lệ câu Nâng cao tăng theo bậc. Hai tầng liền kề không trùng câu hỏi. Đạt 90% được 5 sao; mỗi bậc 10% thấp hơn giảm 1 sao. Cần 5 sao để mở tầng kế. Mỗi câu có 60 giây, chấm ngay khi chọn hoặc hết giờ, tự chuyển câu sau 2 giây; không đổi đáp án hay quay lại câu đã qua. Trượt 3 lần liên tiếp ở tầng cao nhất đang mở sẽ tụt 1 tầng (tối thiểu tầng 1). Chơi lại tầng thấp hơn không ảnh hưởng chuỗi này; qua tầng sẽ xóa chuỗi trượt.</p>
       <p v-if="currentLevel?.requiredAdvancedQuestions != null" class="rules-note">Tầng {{ currentLevel.level }} · Lớp {{ currentLevel.questionGrade }} · {{ currentLevel.requiredNormalQuestions }} câu Thường + {{ currentLevel.requiredAdvancedQuestions }} câu Nâng cao</p>
       <button class="start-button" :disabled="startDisabled" @click="error ? loadProgress() : currentLevel && enterLevel(currentLevel)">{{ startButtonLabel }}</button>
       <p v-if="currentLevel && !loading && !error && !canPlayLevel(currentLevel)" class="start-hint">{{ currentLevel.unavailableReason || `Tầng ${currentLevel.level} cần ${currentLevel.requiredQuestions} câu ${subject} lớp ${currentLevel.questionGrade}, hiện có ${currentLevel.questionCount}.` }}</p>
@@ -18,7 +19,7 @@
       <div v-else-if="error" class="state-card error">{{ error }} <button @click="loadProgress">Thử lại</button></div>
       <div v-else class="journey-content">
         <nav v-if="isAdmin" class="stage-gallery" aria-label="Chọn chặng">
-          <button v-for="number in 10" :key="number" class="stage-card" :class="[`stage-color-${number}`, { selected: number === stage, reached: number <= furthestStage }]" @click="stage = number">
+          <button v-for="number in 10" :key="number" class="stage-card" :aria-label="`Chặng ${number} · ${stageNames[number - 1]} · ${number <= furthestStage ? 'Đã mở' : 'Chưa mở'}`" :class="[`stage-color-${number}`, { selected: number === stage, reached: number <= furthestStage }]" @click="stage = number">
             <span class="stage-illustration">{{ stageIcons[number - 1] }}</span><span class="stage-card-copy"><strong>Chặng {{ String(number).padStart(2, '0') }}</strong><small>{{ stageNames[number - 1] }}</small><i><span :style="{ width: `${stageCompletion(number)}%` }"></span></i></span><span class="stage-card-count">{{ getStageCompleted(number) }}/100</span>
           </button>
         </nav>
@@ -70,7 +71,9 @@ const stageDescriptions = ['Làm quen và tích lũy những ngôi sao đầu ti
 const stageIcons = ['🌱', '🌲', '💧', '🌄', '🧗', '☁️', '🌬️', '🏯', '🌤️', '🏔️']
 const totalStars = computed(() => levels.value.reduce((sum, item) => sum + item.stars, 0))
 const completedLevels = computed(() => levels.value.filter(item => item.isCompleted).length)
-const currentLevel = computed(() => levels.value.find(item => item.isUnlocked && !item.isCompleted) || levels.value.at(-1))
+const rankLevel = ref(null)
+const consecutiveFailures = ref(0)
+const currentLevel = computed(() => levels.value.find(item => item.level === rankLevel.value) || levels.value.find(item => item.isUnlocked && !item.isCompleted) || levels.value.at(-1))
 const canPlayLevel = level => level.canStart ?? (level.questionCount >= level.requiredQuestions)
 const startDisabled = computed(() => loading.value || (!error.value && (!currentLevel.value || !canPlayLevel(currentLevel.value))))
 const startButtonLabel = computed(() => {
@@ -97,6 +100,8 @@ const loadProgress = async () => {
       params: { subject: subject.value },
       ...guestRequestConfig()
     })
+    rankLevel.value = response.data.currentLevel ?? response.data.CurrentLevel ?? null
+    consecutiveFailures.value = response.data.consecutiveFailures ?? response.data.ConsecutiveFailures ?? 0
     levels.value = (response.data.levels ?? response.data.Levels ?? []).map(item => ({
       level: item.level ?? item.Level,
       questionGrade: item.questionGrade ?? item.QuestionGrade,
@@ -199,4 +204,30 @@ watch(subject, loadProgress, { immediate: true })
 @media(max-width:900px){.stage-gallery{grid-template-columns:repeat(5,minmax(104px,1fr));overflow-x:auto;padding:2px 1px 6px;scrollbar-color:var(--subject-on-dark) transparent;scrollbar-width:thin}}
 @media(max-width:700px){.tower-hero{padding:22px 20px}.hero-trophy{right:18px;top:45px;font-size:52px}.tower-hero h1{max-width:72%;font-size:28px}.tower-hero>p{max-width:88%;font-size:13px}.journey-card{padding:12px;border-radius:19px}.journey-content{gap:12px}.stage-gallery{grid-template-columns:repeat(5,112px);gap:7px}.stage-card{min-height:74px;padding:8px;grid-template-columns:36px minmax(0,1fr);column-gap:7px;border-radius:15px}.stage-illustration{width:35px;height:35px;border-radius:12px;font-size:21px}.stage-card-copy strong{padding-right:32px;font-size:10px}.stage-card-copy small{font-size:10px}.stage-card-count{right:6px;top:5px;padding:3px 5px;font-size:10px}.stage-heading{gap:10px;padding:11px;background: var(--subject-soft)}.stage-art{width:44px;height:44px;border-radius:13px;font-size:28px;background: var(--subject-tint);color: var(--subject-primary);box-shadow: none}.stage-copy h2{font-size:16px}.stage-copy p{font-size:12px;line-height:1.7}.stage-kicker{font-size:10px}.stage-progress{font-size:10px}.stage-progress strong{font-size:17px}.stage-levels{grid-template-columns:repeat(5,minmax(0,1fr));gap:12px;padding:24px;background: var(--subject-soft)}.trail-stop{min-height:72px;border-radius:11px;box-shadow: none}.trail-stop.current{min-height:64px;border-radius:12px;background: var(--subject-tint);color: var(--subject-strong);border: 2px solid var(--subject-primary)}.stop-number{font-size:14px}.stop-stars{font-size:10px}.map-legend{gap:8px 13px}.tower-summary{gap:7px}.tower-summary span{font-size:11px;display: inline-flex;align-items: center;gap: 7px}.journey-progress{max-width:100%}}
 @media(prefers-reduced-motion:reduce){.hero-trophy,.trail-stop.current{animation:none}.start-button,.stage-card,.trail-stop,.hero-progress span,.stage-card-copy i span,.lesson-path-progress{transition:none}}
+
+/* Open stages keep their own vivid colors; future stages remain monochrome. */
+.stage-color-1{--stage-accent:#8751df;--stage-tint:#ead6ff;--stage-wash:#f5eaff}
+.stage-color-2{--stage-accent:#148557;--stage-tint:#bdf1d4;--stage-wash:#e6fff0}
+.stage-color-3{--stage-accent:#087eae;--stage-tint:#b7eaff;--stage-wash:#e3f8ff}
+.stage-color-4{--stage-accent:#d46923;--stage-tint:#ffdbb5;--stage-wash:#fff1dd}
+.stage-color-5{--stage-accent:#c44772;--stage-tint:#ffcbde;--stage-wash:#fff0f6}
+.stage-color-6{--stage-accent:#5470cb;--stage-tint:#d0dfff;--stage-wash:#eff4ff}
+.stage-color-7{--stage-accent:#0c8c86;--stage-tint:#b7eee8;--stage-wash:#e6fffa}
+.stage-color-8{--stage-accent:#a24db7;--stage-tint:#f2ceff;--stage-wash:#fcf0ff}
+.stage-color-9{--stage-accent:#aa7617;--stage-tint:#ffe4a1;--stage-wash:#fff8db}
+.stage-color-10{--stage-accent:#c15441;--stage-tint:#ffcebf;--stage-wash:#fff0e9}
+.stage-card.reached{background:radial-gradient(circle at 92% 8%,#ffe4a88c,transparent 56%),linear-gradient(125deg,var(--stage-wash),var(--stage-tint));border-color:color-mix(in srgb,var(--stage-accent) 58%,#fff);box-shadow:0 6px 20px color-mix(in srgb,var(--stage-accent) 16%,transparent)}
+.stage-card.reached::after{content:"";position:absolute;z-index:0;top:-35px;right:-30px;width:115px;height:115px;border:1px solid #ffffffa8;border-radius:50%;box-shadow:0 0 0 18px #ffffff33,0 0 0 38px #ffffff1f;pointer-events:none;transition:transform .25s}
+.stage-card.reached .stage-card-copy strong{color:color-mix(in srgb,var(--stage-accent) 48%,#222)}
+.stage-card.reached .stage-card-copy small{color:color-mix(in srgb,var(--stage-accent) 82%,#222)}
+.stage-card.reached .stage-card-count{border-color:var(--stage-accent);background:var(--stage-accent);color:#fff;box-shadow:0 3px 9px color-mix(in srgb,var(--stage-accent) 24%,transparent)}
+.stage-card.reached .stage-illustration{background:linear-gradient(145deg,#fff,#ffffff8c);box-shadow:0 5px 14px color-mix(in srgb,var(--stage-accent) 22%,transparent)}
+.stage-card.reached .stage-card-copy i{background:#ffffffb3}.stage-card.reached .stage-card-copy i span{background:linear-gradient(90deg,var(--stage-accent),#f5bb40)}
+.stage-card.reached.selected{border-color:var(--stage-accent);box-shadow:inset 0 0 0 2px var(--stage-accent),0 8px 25px color-mix(in srgb,var(--stage-accent) 28%,transparent)}
+.stage-card.reached:hover{border-color:var(--stage-accent);box-shadow:0 12px 28px color-mix(in srgb,var(--stage-accent) 25%,transparent);filter:saturate(1.15)}
+.stage-card:not(.reached){--stage-accent:#777;--stage-tint:#e9e9eb;--stage-wash:#f7f7f8;filter:grayscale(1);background:linear-gradient(135deg,#fff,#f3f3f5);border-color:#dedee2;box-shadow:0 3px 10px #20202805}
+.stage-card:not(.reached) .stage-card-copy strong{color:#595960}.stage-card:not(.reached) .stage-card-copy small{color:#797980}.stage-card:not(.reached) .stage-card-count{color:#707078;background:#fafafa;border-color:#dedee2;box-shadow:none}.stage-card:not(.reached) .stage-illustration{box-shadow:none;opacity:.65}
+.stage-card:not(.reached):hover{filter:grayscale(1);border-color:#a5a5ad;box-shadow:0 6px 16px #2020280d}
+.stage-card:not(.reached).selected{border-color:#97979f;box-shadow:inset 0 0 0 1px #97979f,0 5px 15px #2020280a}
+@media(prefers-reduced-motion:reduce){.stage-card,.stage-card::after{transition:none}.stage-card:hover{transform:none}}
 </style>

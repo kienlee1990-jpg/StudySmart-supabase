@@ -10,9 +10,14 @@ const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^i
 function session(post) {
   let now = 0
   let tick
+  let unmount
+  let timeout
+  let timeoutAt
   const requests = []
   const context = vm.createContext({
-    computed, ref, onMounted() {}, onUnmounted() {},
+    hasAccountSession: () => false, requiresAccountMode: mode => ['Tower', 'ExamRoom'].includes(mode),
+    computed, ref, onMounted() {}, onUnmounted(callback) { unmount = callback },
+    document: { removeEventListener() {}, body: { classList: { remove() {} } } },
     defineProps: () => ({}), useRouter: () => ({ replace() {} }),
     localStorage: { getItem: () => null }, sessionStorage: { setItem() {} },
     guestRequestConfig: () => ({}),
@@ -21,6 +26,8 @@ function session(post) {
       return post ? post(url, data) : { data: { isCorrect: data.optionId === 11, correctOptionId: 11, correctOption: 'A' } }
     } },
     Date: { now: () => now },
+    setTimeout: (callback, delay) => { timeout = callback; timeoutAt = now + delay; return 2 },
+    clearTimeout: () => { timeout = null },
     setInterval: callback => { tick = callback; return 1 }, clearInterval: () => { tick = null }
   })
   vm.runInContext(`${script}
@@ -29,17 +36,17 @@ function session(post) {
     globalThis.state = { answered, feedback, secondsLeft, towerLocked, towerTimedOut, towerAnswerError,
       activeQuestionIndex, goToQuestion, startTowerCountdown, chooseActiveAnswer, gradeTowerAnswer, submit };
   `, context)
-  return { ...context.state, requests, advance: ms => { now += ms; tick?.() }, elapseWithoutTick: ms => { now += ms } }
+  return { ...context.state, requests, unmount: () => unmount(), advance: ms => { now += ms; tick?.(); if (timeout && now >= timeoutAt) { const callback = timeout; timeout = null; callback() } }, elapseWithoutTick: ms => { now += ms } }
 }
 const flush = () => new Promise(resolve => setImmediate(resolve))
 
-test('15-second timeout locks an unanswered question, reveals feedback, and only permits moving forward', async () => {
+test('60-second timeout locks an unanswered question, reveals feedback, and only permits moving forward', async () => {
   const game = session()
   game.startTowerCountdown()
-  assert.equal(game.secondsLeft.value, 15)
+  assert.equal(game.secondsLeft.value, 60)
   game.goToQuestion(1)
   assert.equal(game.activeQuestionIndex.value, 0)
-  game.advance(14_999)
+  game.advance(59_999)
   assert.equal(game.secondsLeft.value, 1)
   assert.equal(game.requests.length, 0)
   game.advance(1)
@@ -51,8 +58,11 @@ test('15-second timeout locks an unanswered question, reveals feedback, and only
   assert.equal(game.feedback.value[1].correctOptionId, 11)
   game.chooseActiveAnswer(11)
   assert.equal(game.requests.length, 1)
-  game.goToQuestion(1)
-  assert.equal(game.secondsLeft.value, 15)
+  game.advance(1999)
+  assert.equal(game.activeQuestionIndex.value, 0)
+  game.advance(1)
+  assert.equal(game.activeQuestionIndex.value, 1)
+  assert.equal(game.secondsLeft.value, 60)
   game.goToQuestion(0)
   assert.equal(game.activeQuestionIndex.value, 1)
 })
@@ -78,7 +88,7 @@ test('selection is graded immediately and cannot change while grading or after f
 test('a delayed timer cannot accept a selection after the deadline', async () => {
   const game = session()
   game.startTowerCountdown()
-  game.elapseWithoutTick(15_001)
+  game.elapseWithoutTick(60_001)
   game.chooseActiveAnswer(11)
   await flush()
   assert.equal(game.requests[0].data.optionId, null)
@@ -104,4 +114,45 @@ test('failed grading retries the locked choice and prevents premature submission
   await game.gradeTowerAnswer()
   assert.equal(game.requests[1].data.optionId, 12)
   assert.equal(game.feedback.value[1].isCorrect, false)
+})
+
+
+test('automatically advances after feedback and submits after the last answer', async () => {
+  const game = session((url, data) => ({ data: url.endsWith('/submit')
+    ? { score: 100 }
+    : { isCorrect: true, correctOptionId: 11, correctOption: 'A' } }))
+  game.startTowerCountdown()
+  game.chooseActiveAnswer(11)
+  await flush()
+  game.advance(2000)
+  assert.equal(game.activeQuestionIndex.value, 1)
+  assert.equal(game.secondsLeft.value, 60)
+  game.chooseActiveAnswer(11)
+  await flush()
+  assert.equal(game.requests.length, 2)
+  game.advance(2000)
+  await flush()
+  assert.equal(game.requests.length, 3)
+  assert.ok(game.requests[2].url.endsWith('/submit'))
+})
+
+test('leaving during grading or feedback cancels automatic progression', async () => {
+  let resolve
+  const game = session(() => new Promise(done => { resolve = done }))
+  game.startTowerCountdown()
+  game.chooseActiveAnswer(11)
+  game.unmount()
+  resolve({ data: { isCorrect: true, correctOptionId: 11, correctOption: 'A' } })
+  await flush()
+  game.advance(2000)
+  assert.equal(game.activeQuestionIndex.value, 0)
+  assert.equal(game.requests.length, 1)
+
+  const graded = session()
+  graded.startTowerCountdown()
+  graded.chooseActiveAnswer(11)
+  await flush()
+  graded.unmount()
+  graded.advance(2000)
+  assert.equal(graded.activeQuestionIndex.value, 0)
 })

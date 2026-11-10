@@ -39,6 +39,7 @@
 
 <script setup>
     import { ref, onMounted, computed } from "vue"
+    import { hasAccountSession } from "../utils/accountSession"
     import { RouterLink, useRouter } from "vue-router"
     import AppearancePicker from "./quiz/ui/AppearancePicker.vue"
     import { useAuth } from "../composables/useAuth"
@@ -68,7 +69,7 @@
 
     // ðŸ”¥ AUTO REDIRECT IF TOKEN EXISTS
     onMounted(() => {
-        const token = localStorage.getItem("token")
+        const token = hasAccountSession()
         if (token) router.push("/")
     })
 
