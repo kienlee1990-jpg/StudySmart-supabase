@@ -10,6 +10,12 @@ public class CreateQuizQuestionDto
     [Required, RegularExpression("^(Toán|Tiếng Anh|Tiếng Việt)$")]
     public string Subject { get; set; } = string.Empty;
 
+    [RegularExpression("^(Thường|Nâng cao)$")]
+    public string Difficulty { get; set; } = "Thường";
+
+    [MaxLength(200)]
+    public string? Topic { get; set; }
+
     [Required, MaxLength(4000)]
     public string Content { get; set; } = string.Empty;
 

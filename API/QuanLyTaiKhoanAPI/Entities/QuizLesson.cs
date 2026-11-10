@@ -9,6 +9,12 @@ public class QuizLesson
     [Required, MaxLength(200)]
     public string Title { get; set; } = string.Empty;
 
+    [MaxLength(200)]
+    public string? Topic { get; set; }
+
+    [MaxLength(2000)]
+    public string? VideoUrl { get; set; }
+
     [MaxLength(1000)]
     public string? Summary { get; set; }
 

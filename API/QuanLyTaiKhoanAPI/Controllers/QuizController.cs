@@ -48,7 +48,7 @@ public class QuizController : ControllerBase
         var lessons = await _db.QuizLessons.AsNoTracking()
             .Where(item => item.IsPublished && item.Grade == grade && item.Subject == subject)
             .OrderBy(item => item.Title)
-            .Select(item => new { item.Id, item.Title, item.Summary, item.Content, item.Grade, item.Subject })
+            .Select(item => new { item.Id, item.Title, item.Topic, item.Summary, item.Content, item.VideoUrl, item.Grade, item.Subject })
             .ToListAsync();
         return Ok(lessons);
     }
@@ -58,6 +58,25 @@ public class QuizController : ControllerBase
     {
         var count = await _store.CountQuestionsAsync(grade, subject);
         return Ok(new { grade, subject, availableCount = count, requiredFor15Minutes = 10, requiredFor60Minutes = 40 });
+    }
+
+    [HttpGet("question-topics")]
+    public async Task<IActionResult> GetQuestionTopics([FromQuery] int grade, [FromQuery] string subject)
+    {
+        if (grade is < 4 or > 12 || !IsAllowedSubject(subject))
+            return BadRequest(new { message = "Lớp hoặc môn học không hợp lệ." });
+        var topicRows = await _db.QuizQuestions.AsNoTracking()
+            .Where(question => question.IsActive && question.Grade == grade && question.Subject == subject)
+            .GroupBy(question => question.Topic)
+            .Select(group => new { Topic = group.Key, Count = group.Count() })
+            .ToListAsync();
+        var topics = topicRows
+            .GroupBy(item => string.IsNullOrWhiteSpace(item.Topic) ? null : item.Topic.Trim(), StringComparer.OrdinalIgnoreCase)
+            .Select(group => new { Topic = group.Key, Count = group.Sum(item => item.Count) })
+            .OrderBy(item => item.Topic == null ? 1 : 0)
+            .ThenBy(item => item.Topic)
+            .ToList();
+        return Ok(topics);
     }
 
     [HttpGet("tower/progress")]
@@ -119,25 +138,35 @@ public class QuizController : ControllerBase
         if (progressChanged) await _db.SaveChangesAsync();
 
         var starsByLevel = progress.ToDictionary(item => item.Level, item => item.Stars);
-        var questionCounts = await _db.QuizQuestions.AsNoTracking()
+        var bank = await _db.QuizQuestions.AsNoTracking()
             .Where(question => question.IsActive && question.Subject == subject)
-            .GroupBy(question => question.Grade)
-            .Select(group => new { Grade = group.Key, Count = group.Count() })
-            .ToDictionaryAsync(item => item.Grade, item => item.Count);
+            .Select(question => new QuizQuestion
+            {
+                Id = question.Id, Grade = question.Grade, Content = question.Content,
+                Difficulty = question.Difficulty, IsActive = question.IsActive
+            }).ToListAsync();
+        var questionPool = new TowerQuestionPool(bank);
         var levels = Enumerable.Range(1, TowerLevelCount).Select(level =>
         {
             var stars = starsByLevel.GetValueOrDefault(level);
-            var (questionGrade, requiredQuestions) = GetTowerLevelRules(level);
+            var rules = TowerQuestionPolicy.GetRules(level);
+            var availability = questionPool.Availability(rules);
             return new
             {
                 Level = level,
-                QuestionGrade = questionGrade,
+                QuestionGrade = rules.QuestionGrade,
                 Stars = stars,
                 MaxStars = TowerMaximumStars,
                 IsUnlocked = level == 1 || starsByLevel.GetValueOrDefault(level - 1) >= TowerMaximumStars,
                 IsCompleted = stars >= TowerMaximumStars,
-                QuestionCount = questionCounts.GetValueOrDefault(questionGrade),
-                RequiredQuestions = requiredQuestions
+                QuestionCount = availability.NormalQuestions + availability.AdvancedQuestions,
+                RequiredQuestions = rules.RequiredQuestions,
+                RequiredNormalQuestions = rules.NormalQuestions,
+                RequiredAdvancedQuestions = rules.AdvancedQuestions,
+                AvailableNormalQuestions = availability.NormalQuestions,
+                AvailableAdvancedQuestions = availability.AdvancedQuestions,
+                CanStart = availability.CanStart(rules),
+                UnavailableReason = availability.UnavailableReason(rules)
             };
         }).ToList();
         return Ok(new { Subject = subject, StarRules = "90%+: 5 sao; 80–89%: 4 sao; 70–79%: 3 sao; 60–69%: 2 sao; 50–59%: 1 sao; dưới 50%: 0 sao.", Levels = levels });
@@ -159,21 +188,22 @@ public class QuizController : ControllerBase
             var previousStars = userId != null
                 ? await previousProgress.Where(item => item.UserId == userId).Select(item => (int?)item.Stars).FirstOrDefaultAsync()
                 : await previousProgress.Where(item => item.GuestId == guestId).Select(item => (int?)item.Stars).FirstOrDefaultAsync();
-            if (previousStars < TowerMaximumStars)
+            if (previousStars.GetValueOrDefault() < TowerMaximumStars)
                 return Conflict(new { message = $"Level {dto.Level} đang khóa. Hãy đạt đủ {TowerMaximumStars} sao ở Level {dto.Level - 1} trước nhé." });
         }
 
-        var (questionGrade, requiredQuestions) = GetTowerLevelRules(dto.Level);
-        var pool = await _store.GetQuestionsAsync(questionGrade, dto.Subject);
-        if (pool.Count < requiredQuestions)
-            return BadRequest(new { message = $"Level {dto.Level} cần {requiredQuestions} câu môn {dto.Subject} từ ngân hàng lớp {questionGrade}; hiện có {pool.Count}." });
+        var rules = TowerQuestionPolicy.GetRules(dto.Level);
+        var pool = new TowerQuestionPool(await _store.GetQuestionsAsync(rules.QuestionGrade, dto.Subject));
+        var availability = pool.Availability(rules);
+        if (!availability.CanStart(rules))
+            return BadRequest(new { message = availability.UnavailableReason(rules) });
 
-        var chosen = pool.OrderBy(_ => Random.Shared.Next()).Take(requiredQuestions).ToList();
+        var chosen = pool.Select(rules);
         var exam = new QuizExam
         {
             Title = $"Leo tháp · Level {dto.Level} · {dto.Subject}",
-            Description = $"{requiredQuestions} câu hỏi lớp {questionGrade}. Số sao của lượt này tính theo điểm: từ 90% nhận 5 sao; cứ mỗi 10% thấp hơn giảm 1 sao.",
-            Grade = questionGrade,
+            Description = $"{rules.RequiredQuestions} câu hỏi lớp {rules.QuestionGrade}: {rules.NormalQuestions} câu Thường, {rules.AdvancedQuestions} câu Nâng cao. Hai tầng liền kề không trùng câu. Số sao của lượt này tính theo điểm: từ 90% nhận 5 sao; cứ mỗi 10% thấp hơn giảm 1 sao.",
+            Grade = rules.QuestionGrade,
             TowerLevel = dto.Level,
             Subject = dto.Subject,
             Mode = "Tower",
@@ -189,7 +219,7 @@ public class QuizController : ControllerBase
             Exam = exam,
             UserId = userId,
             GuestId = guestId,
-            TotalQuestions = chosen.Count
+            TotalQuestions = chosen.Length
         };
         _db.QuizAttempts.Add(attempt);
         await _db.SaveChangesAsync();
@@ -203,10 +233,11 @@ public class QuizController : ControllerBase
             {
                 exam.Id, exam.Title, exam.Description, exam.Grade, exam.Subject, exam.Mode,
                 exam.DurationMinutes, TowerLevel = dto.Level,
+                NormalQuestions = rules.NormalQuestions, AdvancedQuestions = rules.AdvancedQuestions,
                 Questions = chosen.Select(question => new
                 {
                     question.Id, question.Content,
-                    Options = question.Options.OrderBy(_ => Random.Shared.Next()).Select(option => new { option.Id, option.Content })
+                    Options = TowerQuestionPolicy.Shuffle(question.Options).Select(option => new { option.Id, option.Content }).ToArray()
                 })
             }
         });
@@ -222,11 +253,24 @@ public class QuizController : ControllerBase
             return BadRequest(new { message = "Chọn chế độ kiểm tra hoặc phòng thi." });
 
         var pool = await _store.GetQuestionsAsync(dto.Grade, dto.Subject);
+        if (dto.Topics.Count > 0)
+        {
+            var selectedTopics = dto.Topics
+                .Select(topic => string.IsNullOrWhiteSpace(topic) ? null : topic.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            var availableTopics = pool.Select(question => string.IsNullOrWhiteSpace(question.Topic) ? null : question.Topic.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            if (selectedTopics.Any(topic => topic != null && !availableTopics.Contains(topic)))
+                return BadRequest(new { message = "Có chủ đề không thuộc môn học hoặc lớp đã chọn. Hãy tải lại danh sách chủ đề." });
+            pool = pool.Where(question => selectedTopics.Contains(
+                string.IsNullOrWhiteSpace(question.Topic) ? null : question.Topic.Trim(), StringComparer.OrdinalIgnoreCase)).ToList();
+        }
         if (pool.Count < count)
-            return BadRequest(new { message = $"Ngân hàng hiện có {pool.Count} câu cho môn {dto.Subject}, lớp {dto.Grade}; cần ít nhất {count} câu khác nhau. Hãy bổ sung câu hỏi trong trang quản trị." });
+            return BadRequest(new { message = $"Các chủ đề đã chọn hiện có {pool.Count} câu cho môn {dto.Subject}, lớp {dto.Grade}; cần ít nhất {count} câu khác nhau. Hãy chọn thêm chủ đề hoặc bổ sung câu hỏi." });
 
         var chosen = pool.OrderBy(_ => Random.Shared.Next()).Take(count).ToList();
-        var title = $"{(dto.Mode == "Test" ? "Kiểm tra" : "Thi thử")} {dto.DurationMinutes} phút · {dto.Subject} · Lớp {dto.Grade}";
+        var title = $"{(dto.Mode == "Test" ? "Kiểm tra" : "Bài thi")} {dto.DurationMinutes} phút · {dto.Subject} · Lớp {dto.Grade}";
         var exam = new QuizExam
         {
             Title = title,
@@ -349,7 +393,7 @@ public class QuizController : ControllerBase
         var attempt = await _db.QuizAttempts.Include(item => item.Exam)
             .FirstOrDefaultAsync(item => item.Id == attemptId);
         if (attempt == null) return NotFound();
-        if (attempt.SubmittedAt.HasValue || attempt.Exam.Mode != "Study")
+        if (attempt.SubmittedAt.HasValue || attempt.Exam.Mode is not ("Study" or "Tower"))
             return BadRequest(new { message = "Chế độ này không hỗ trợ xem đáp án từng câu." });
 
         var currentUserId = User.Identity?.IsAuthenticated == true
@@ -367,12 +411,39 @@ public class QuizController : ControllerBase
         var question = session.Questions.FirstOrDefault(item => item.Id == dto.QuestionId);
         if (question == null) return BadRequest(new { message = "Câu hỏi không thuộc lượt học này." });
         var option = dto.OptionId == null ? null : question.Options.FirstOrDefault(item => item.Id == dto.OptionId.Value);
-        if (option == null) return BadRequest(new { message = "Hãy chọn một đáp án hợp lệ." });
+        if ((dto.OptionId != null && option == null) || (attempt.Exam.Mode == "Study" && option == null))
+            return BadRequest(new { message = "Hãy chọn một đáp án hợp lệ." });
+
+        if (attempt.Exam.Mode == "Tower")
+        {
+            var savedAnswers = await _db.QuizAnswers.Where(item => item.AttemptId == attemptId).ToListAsync();
+            var saved = savedAnswers.FirstOrDefault(item => item.QuestionId == question.Id);
+            // A retry after a lost response is safe; changing an answer is forbidden.
+            if (saved != null)
+            {
+                if (saved.OptionId != dto.OptionId)
+                    return Conflict(new { message = "Câu này đã chấm, không thể đổi đáp án." });
+                var lastAnsweredQuestion = session.Questions.Last(item => savedAnswers.Any(answer => answer.QuestionId == item.Id));
+                if (lastAnsweredQuestion.Id != question.Id)
+                    return Conflict(new { message = "Không thể xem lại câu đã qua." });
+            }
+            else
+            {
+                var nextQuestion = session.Questions.FirstOrDefault(item => savedAnswers.All(answer => answer.QuestionId != item.Id));
+                if (nextQuestion?.Id != question.Id)
+                    return Conflict(new { message = "Hãy trả lời lần lượt từng câu." });
+                _db.QuizAnswers.Add(new QuizAnswer
+                {
+                    AttemptId = attemptId, QuestionId = question.Id, OptionId = option?.Id, IsCorrect = option?.IsCorrect == true
+                });
+                await _db.SaveChangesAsync();
+            }
+        }
 
         var correctOption = question.Options.First(item => item.IsCorrect);
         return Ok(new
         {
-            IsCorrect = option.IsCorrect,
+            IsCorrect = option?.IsCorrect == true,
             CorrectOptionId = correctOption.Id,
             CorrectOption = correctOption.Content,
             question.Explanation
@@ -408,6 +479,16 @@ public class QuizController : ControllerBase
         if (suppliedAnswers.Keys.Any(questionId => questions.All(question => question.Id != questionId)))
             return BadRequest(new { message = "Câu trả lời không thuộc bài làm này." });
 
+        if (attempt.Exam.Mode == "Tower")
+        {
+            var savedAnswers = await _db.QuizAnswers.Where(item => item.AttemptId == attemptId).ToListAsync();
+            if (savedAnswers.Count != questions.Count)
+                return Conflict(new { message = "Hãy hoàn thành từng câu trước khi kết thúc lượt leo tháp." });
+            // Final scoring always uses the choices already locked by the answer endpoint.
+            suppliedAnswers = savedAnswers.ToDictionary(item => item.QuestionId,
+                item => new SubmitQuizAnswerDto { QuestionId = item.QuestionId, OptionId = item.OptionId });
+        }
+
         var answers = new List<(QuizQuestion Question, int? OptionId, bool IsCorrect, QuizOption? CorrectOption)>();
         foreach (var question in questions)
         {
@@ -420,11 +501,14 @@ public class QuizController : ControllerBase
             answers.Add((question, option?.Id, option?.IsCorrect == true, question.Options.FirstOrDefault(item => item.IsCorrect)));
         }
 
-        _db.QuizAnswers.AddRange(answers.Select(answer => new QuizAnswer
+        if (attempt.Exam.Mode != "Tower")
         {
-            AttemptId = attempt.Id, QuestionId = answer.Question.Id,
-            OptionId = answer.OptionId, IsCorrect = answer.IsCorrect
-        }));
+            _db.QuizAnswers.AddRange(answers.Select(answer => new QuizAnswer
+            {
+                AttemptId = attempt.Id, QuestionId = answer.Question.Id,
+                OptionId = answer.OptionId, IsCorrect = answer.IsCorrect
+            }));
+        }
         var correctCount = answers.Count(answer => answer.IsCorrect);
         attempt.SubmittedAt = DateTime.UtcNow;
         attempt.Score = questions.Count == 0 ? 0 : Math.Round(100m * correctCount / questions.Count, 2);
@@ -473,7 +557,7 @@ public class QuizController : ControllerBase
             attempt.Id, attempt.Exam.Title, attempt.Exam.Subject, attempt.Exam.Grade, Mode = attempt.Exam.Mode,
             attempt.Score, CorrectCount = correctCount, TotalQuestions = questions.Count,
             Tower = towerResult,
-            Answers = answers.Select(answer => new
+            Answers = answers.Where(_ => attempt.Exam.Mode != "Tower").Select(answer => new
             {
                 answer.Question.Id, answer.Question.Content, answer.OptionId, answer.IsCorrect,
                 CorrectOptionId = answer.CorrectOption?.Id, CorrectOption = answer.CorrectOption?.Content,
@@ -543,20 +627,12 @@ public class QuizController : ControllerBase
             attempt.Id, exam.Title, exam.Subject, exam.Grade, exam.Mode, Tower = tower,
             attempt.Score, CorrectCount = (int)Math.Round((attempt.Score ?? 0) * attempt.TotalQuestions / 100m),
             TotalQuestions = attempt.TotalQuestions,
-            Answers = answers
+            Answers = exam.Mode == "Tower" ? answers.Take(0).ToList() : answers
         });
     }
 
     private static string? CleanGuestName(string? value)
         => string.IsNullOrWhiteSpace(value) ? null : value.Trim();
-
-    private static (int QuestionGrade, int RequiredQuestions) GetTowerLevelRules(int level)
-    {
-        var boundedLevel = Math.Clamp(level, 1, TowerLevelCount);
-        var questionGrade = 5 + (int)(((long)(boundedLevel - 1) * 7) / (TowerLevelCount - 1));
-        var requiredQuestions = 5 + (int)(((long)(boundedLevel - 1) * 15) / (TowerLevelCount - 1));
-        return (questionGrade, requiredQuestions);
-    }
 
     private static int CalculateTowerStars(int correctCount, int totalQuestions)
     {
@@ -603,6 +679,9 @@ public sealed class StartRandomQuizDto
 
     [MaxLength(100)]
     public string? GuestName { get; set; }
+
+    [MaxLength(50)]
+    public List<string?> Topics { get; set; } = [];
 }
 
 public sealed class StartTowerLevelDto

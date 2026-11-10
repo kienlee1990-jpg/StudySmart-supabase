@@ -35,3 +35,19 @@ __pycache__/
 
 # Vercel local project linkage
 .vercel/
+
+# Private credentials and local exports
+.aws/
+.ssh/
+**/secrets*.json
+*service-account*.json
+*credentials*.json
+*.p8
+*.jks
+*.keystore
+*.dump
+*.sql.gz
+*.bak
+*.backup
+coverage/
+.pytest_cache/

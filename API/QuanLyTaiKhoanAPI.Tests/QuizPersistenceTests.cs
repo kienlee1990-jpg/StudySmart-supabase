@@ -81,6 +81,58 @@ public sealed class QuizPersistenceTests : IDisposable
     }
 
     [Fact]
+    public async Task TowerAnswersAreSequentialImmutableAndUsedForFinalScore()
+    {
+        int attemptId;
+        List<SubmitQuizAnswerDto> correctAnswers;
+        await using (var db = Open())
+        {
+            await db.Database.EnsureCreatedAsync();
+            var store = new QuizStore(db);
+            for (var i = 0; i < 40; i++)
+                await store.AddQuestionAsync(5, "Toán", $"Tower question {i}", "Explanation",
+                    [("Correct", true), ("Wrong", false)]);
+            var controller = Controller(db);
+            var start = Assert.IsType<OkObjectResult>(await controller.StartTowerSession(new() { Subject = "Toán", Level = 1 }));
+            attemptId = JsonSerializer.SerializeToElement(start.Value).GetProperty("attempt").GetProperty("Id").GetInt32();
+            var session = (await store.GetSessionAsync(attemptId))!;
+            correctAnswers = session.Questions.Select(question => new SubmitQuizAnswerDto
+            {
+                QuestionId = question.Id, OptionId = question.Options.Single(option => option.IsCorrect).Id
+            }).ToList();
+            Assert.IsType<ConflictObjectResult>(await controller.CheckStudyAnswer(attemptId, correctAnswers[1]));
+            Assert.IsType<ForbidResult>(await Controller(db, Guid.NewGuid().ToString("N"))
+                .CheckStudyAnswer(attemptId, correctAnswers[0]));
+            var timeout = new SubmitQuizAnswerDto { QuestionId = correctAnswers[0].QuestionId, OptionId = null };
+            var response = Assert.IsType<OkObjectResult>(await controller.CheckStudyAnswer(attemptId, timeout));
+            var feedback = JsonSerializer.SerializeToElement(response.Value);
+            Assert.False(feedback.GetProperty("IsCorrect").GetBoolean());
+            Assert.Equal(correctAnswers[0].OptionId, feedback.GetProperty("CorrectOptionId").GetInt32());
+            Assert.IsType<OkObjectResult>(await controller.CheckStudyAnswer(attemptId, timeout));
+            Assert.IsType<ConflictObjectResult>(await controller.CheckStudyAnswer(attemptId, correctAnswers[0]));
+            Assert.IsType<ConflictObjectResult>(await controller.SubmitAttempt(attemptId, new() { Answers = correctAnswers }));
+        }
+        // Locked answers must survive a new request/database context.
+        await using (var db = Open())
+        {
+            var controller = Controller(db);
+            foreach (var answer in correctAnswers.Skip(1))
+                Assert.IsType<OkObjectResult>(await controller.CheckStudyAnswer(attemptId, answer));
+            Assert.IsType<ConflictObjectResult>(await controller.CheckStudyAnswer(attemptId,
+                new() { QuestionId = correctAnswers[0].QuestionId, OptionId = null }));
+            // A forged all-correct submission cannot replace the timed-out answer.
+            var submitted = Assert.IsType<OkObjectResult>(await controller.SubmitAttempt(attemptId, new() { Answers = correctAnswers }));
+            var result = JsonSerializer.SerializeToElement(submitted.Value);
+            Assert.Equal(80m, result.GetProperty("Score").GetDecimal());
+            Assert.Equal(4, result.GetProperty("CorrectCount").GetInt32());
+            Assert.Empty(result.GetProperty("Answers").EnumerateArray());
+            Assert.Equal(5, await db.QuizAnswers.CountAsync());
+            var savedResult = Assert.IsType<OkObjectResult>(await controller.GetAttemptResult(attemptId));
+            Assert.Empty(JsonSerializer.SerializeToElement(savedResult.Value).GetProperty("Answers").EnumerateArray());
+        }
+    }
+
+    [Fact]
     public async Task DuplicateQuestionCheckSurvivesRestartAndFiltersByGradeAndSubject()
     {
         await using (var db = Open())

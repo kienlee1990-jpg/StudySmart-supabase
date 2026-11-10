@@ -8,6 +8,8 @@ import Permissions from "../components/views/Permissions.vue"
 import Users from "../components/views/Users.vue"
 import SubjectSelect from "../components/quiz/SubjectSelect.vue"
 import SubjectHome from "../components/quiz/SubjectHome.vue"
+import LessonCatalog from "../components/quiz/LessonCatalog.vue"
+import LessonVideo from "../components/quiz/LessonVideo.vue"
 import Ranking from "../components/quiz/Ranking.vue"
 import QuizPlay from "../components/quiz/QuizPlay.vue"
 import QuizResult from "../components/quiz/QuizResult.vue"
@@ -33,9 +35,11 @@ const routes = [
     },
     { path: "/register", name: "StudentRegister", component: StudentRegister },
     { path: "/subjects/:subjectSlug", name: "SubjectHome", component: SubjectHome },
+    { path: "/learning/:subjectSlug/:grade", name: "LessonCatalog", component: LessonCatalog },
+    { path: "/learning/:subjectSlug/:grade/video/:id", name: "LessonVideo", component: LessonVideo },
     { path: "/ranking", name: "Ranking", component: Ranking },
     { path: "/tower-session/:subjectSlug/:level", name: "TowerSession", component: QuizPlay, props: route => ({ ...route.params, mode: "Tower" }) },
-    { path: "/quiz-session/:subjectSlug/:mode/:grade/:duration", name: "QuizSession", component: QuizPlay, props: true },
+    { path: "/quiz-session/:subjectSlug/:mode/:grade/:duration", name: "QuizSession", component: QuizPlay, props: route => ({ ...route.params, topics: route.query.topics }) },
     { path: "/quiz/:id", name: "QuizPlay", component: QuizPlay, props: true },
     { path: "/quiz-result/:id", name: "QuizResult", component: QuizResult, props: true },
     { path: "/quiz-admin", name: "QuizAdmin", component: QuizAdmin, meta: { requiresAuth: true, permission: "ManageQuizContent" } },
@@ -75,7 +79,16 @@ const routes = [
 
 const router = createRouter({
     history: createWebHistory(),
-    routes
+    routes,
+    scrollBehavior(to, from, savedPosition) {
+        if (savedPosition) return savedPosition
+        if (to.hash) return {
+            el: to.hash,
+            top: 100,
+            behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth'
+        }
+        return { top: 0 }
+    }
 })
 
 const clearStoredSession = () => {

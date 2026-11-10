@@ -1,0 +1,181 @@
+/* Central palettes support automatic subject colors and a saved manual choice. */
+:root {
+  --palette-toan-primary: #72439f;
+  --palette-toan-strong: #633190;
+  --palette-toan-ink: #39244f;
+  --palette-toan-muted: #5e4d71;
+  --palette-toan-soft: #f5effb;
+  --palette-toan-tint: #e4d5f3;
+  --palette-toan-line: #cebae4;
+  --palette-toan-deep: #3c296b;
+  --palette-toan-on-dark: #e4d5f3;
+  --palette-tieng-anh-primary: #216b81;
+  --palette-tieng-anh-strong: #1b6178;
+  --palette-tieng-anh-ink: #193f52;
+  --palette-tieng-anh-muted: #3d5c6a;
+  --palette-tieng-anh-soft: #edf7fb;
+  --palette-tieng-anh-tint: #cde8f1;
+  --palette-tieng-anh-line: #b5d7e3;
+  --palette-tieng-anh-deep: #16465a;
+  --palette-tieng-anh-on-dark: #cde8f1;
+  --palette-tieng-viet-primary: #974461;
+  --palette-tieng-viet-strong: #913f5f;
+  --palette-tieng-viet-ink: #613147;
+  --palette-tieng-viet-muted: #704b5b;
+  --palette-tieng-viet-soft: #fcf0f4;
+  --palette-tieng-viet-tint: #f3d5df;
+  --palette-tieng-viet-line: #dfb7c8;
+  --palette-tieng-viet-deep: #68354c;
+  --palette-tieng-viet-on-dark: #f3d5df;
+  --palette-emerald-primary: #24644f;
+  --palette-emerald-strong: #194f3e;
+  --palette-emerald-ink: #1c3d32;
+  --palette-emerald-muted: #466457;
+  --palette-emerald-soft: #eff7f2;
+  --palette-emerald-tint: #d4e9de;
+  --palette-emerald-line: #b2d2c1;
+  --palette-emerald-deep: #163b2e;
+  --palette-emerald-on-dark: #e1f0e8;
+  --palette-wine-primary: #853c4d;
+  --palette-wine-strong: #702d3d;
+  --palette-wine-ink: #49232c;
+  --palette-wine-muted: #71535b;
+  --palette-wine-soft: #fcf2f3;
+  --palette-wine-tint: #efd9dd;
+  --palette-wine-line: #d8b7bf;
+  --palette-wine-deep: #4f2330;
+  --palette-wine-on-dark: #f7e7ea;
+  --palette-navy-primary: #304c70;
+  --palette-navy-strong: #223d60;
+  --palette-navy-ink: #1d3048;
+  --palette-navy-muted: #4a5d73;
+  --palette-navy-soft: #f0f4fa;
+  --palette-navy-tint: #dae4f0;
+  --palette-navy-line: #bccbdf;
+  --palette-navy-deep: #172d49;
+  --palette-navy-on-dark: #e5edf7;
+  --palette-plum-primary: #714362;
+  --palette-plum-strong: #5c314f;
+  --palette-plum-ink: #402539;
+  --palette-plum-muted: #6b5264;
+  --palette-plum-soft: #f8f0f5;
+  --palette-plum-tint: #ead8e4;
+  --palette-plum-line: #d0b5c7;
+  --palette-plum-deep: #45263b;
+  --palette-plum-on-dark: #f4e7f0;
+}
+:root,
+[data-subject="general"],
+[data-subject="toan"],
+:root[data-color-choice="toan"],
+:root[data-color-choice="toan"] [data-subject] {
+  --subject-primary: var(--palette-toan-primary);
+  --subject-strong: var(--palette-toan-strong);
+  --subject-ink: var(--palette-toan-ink);
+  --subject-muted: var(--palette-toan-muted);
+  --subject-soft: var(--palette-toan-soft);
+  --subject-tint: var(--palette-toan-tint);
+  --subject-line: var(--palette-toan-line);
+  --subject-deep: var(--palette-toan-deep);
+  --subject-on-dark: var(--palette-toan-on-dark);
+}
+[data-subject="tieng-anh"],
+:root[data-color-choice="tieng-anh"],
+:root[data-color-choice="tieng-anh"] [data-subject] {
+  --subject-primary: var(--palette-tieng-anh-primary);
+  --subject-strong: var(--palette-tieng-anh-strong);
+  --subject-ink: var(--palette-tieng-anh-ink);
+  --subject-muted: var(--palette-tieng-anh-muted);
+  --subject-soft: var(--palette-tieng-anh-soft);
+  --subject-tint: var(--palette-tieng-anh-tint);
+  --subject-line: var(--palette-tieng-anh-line);
+  --subject-deep: var(--palette-tieng-anh-deep);
+  --subject-on-dark: var(--palette-tieng-anh-on-dark);
+}
+[data-subject="tieng-viet"],
+:root[data-color-choice="tieng-viet"],
+:root[data-color-choice="tieng-viet"] [data-subject] {
+  --subject-primary: var(--palette-tieng-viet-primary);
+  --subject-strong: var(--palette-tieng-viet-strong);
+  --subject-ink: var(--palette-tieng-viet-ink);
+  --subject-muted: var(--palette-tieng-viet-muted);
+  --subject-soft: var(--palette-tieng-viet-soft);
+  --subject-tint: var(--palette-tieng-viet-tint);
+  --subject-line: var(--palette-tieng-viet-line);
+  --subject-deep: var(--palette-tieng-viet-deep);
+  --subject-on-dark: var(--palette-tieng-viet-on-dark);
+}
+
+:root[data-color-choice="emerald"],
+:root[data-color-choice="emerald"] [data-subject] {
+  --subject-primary: var(--palette-emerald-primary);
+  --subject-strong: var(--palette-emerald-strong);
+  --subject-ink: var(--palette-emerald-ink);
+  --subject-muted: var(--palette-emerald-muted);
+  --subject-soft: var(--palette-emerald-soft);
+  --subject-tint: var(--palette-emerald-tint);
+  --subject-line: var(--palette-emerald-line);
+  --subject-deep: var(--palette-emerald-deep);
+  --subject-on-dark: var(--palette-emerald-on-dark);
+}
+:root[data-color-choice="wine"],
+:root[data-color-choice="wine"] [data-subject] {
+  --subject-primary: var(--palette-wine-primary);
+  --subject-strong: var(--palette-wine-strong);
+  --subject-ink: var(--palette-wine-ink);
+  --subject-muted: var(--palette-wine-muted);
+  --subject-soft: var(--palette-wine-soft);
+  --subject-tint: var(--palette-wine-tint);
+  --subject-line: var(--palette-wine-line);
+  --subject-deep: var(--palette-wine-deep);
+  --subject-on-dark: var(--palette-wine-on-dark);
+}
+:root[data-color-choice="navy"],
+:root[data-color-choice="navy"] [data-subject] {
+  --subject-primary: var(--palette-navy-primary);
+  --subject-strong: var(--palette-navy-strong);
+  --subject-ink: var(--palette-navy-ink);
+  --subject-muted: var(--palette-navy-muted);
+  --subject-soft: var(--palette-navy-soft);
+  --subject-tint: var(--palette-navy-tint);
+  --subject-line: var(--palette-navy-line);
+  --subject-deep: var(--palette-navy-deep);
+  --subject-on-dark: var(--palette-navy-on-dark);
+}
+:root[data-color-choice="plum"],
+:root[data-color-choice="plum"] [data-subject] {
+  --subject-primary: var(--palette-plum-primary);
+  --subject-strong: var(--palette-plum-strong);
+  --subject-ink: var(--palette-plum-ink);
+  --subject-muted: var(--palette-plum-muted);
+  --subject-soft: var(--palette-plum-soft);
+  --subject-tint: var(--palette-plum-tint);
+  --subject-line: var(--palette-plum-line);
+  --subject-deep: var(--palette-plum-deep);
+  --subject-on-dark: var(--palette-plum-on-dark);
+}
+
+/* Keep the account-management shell's navy/gold decoration off learning pages. */
+body:has(.quiz-app) {
+  background: #f6f6f8;
+}
+body:has(.quiz-app)::before {
+  display: none;
+}
+.container-fluid:has(> .quiz-app) {
+  padding-inline: 0;
+}
+
+/* Shared interaction rules across all learning screens. */
+.quiz-app { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+.quiz-app button, .quiz-app input, .quiz-app select, .quiz-app textarea { font-family: inherit; }
+.quiz-app button:focus-visible, .quiz-app a:focus-visible, .topic-modal button:focus-visible {
+  outline: 3px solid var(--subject-primary);
+  outline-offset: 4px;
+}
+.quiz-app input, .quiz-app select, .quiz-app textarea { accent-color: var(--subject-strong); }
+.quiz-app h1, .quiz-app h2, .quiz-app h3 { text-wrap: balance; }
+.quiz-app p { text-wrap: pretty; }
+@media (max-width: 600px) {
+  .quiz-app .notice-strip { display: none; }
+}

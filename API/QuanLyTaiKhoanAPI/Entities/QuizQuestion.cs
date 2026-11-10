@@ -10,6 +10,12 @@ public class QuizQuestion
     [Required, MaxLength(30)]
     public string Subject { get; set; } = string.Empty;
 
+    [Required, MaxLength(20)]
+    public string Difficulty { get; set; } = "Thường";
+
+    [MaxLength(200)]
+    public string? Topic { get; set; }
+
     [Required, MaxLength(4000)]
     public string Content { get; set; } = string.Empty;
 
